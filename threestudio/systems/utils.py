@@ -7,6 +7,10 @@ import torch.nn as nn
 from torch.optim import lr_scheduler
 
 import threestudio
+import json
+import os
+from pathlib import Path
+from collections import defaultdict
 
 
 def get_scheduler(name):
@@ -102,3 +106,27 @@ def parse_scheduler(config, optimizer):
             "interval": interval,
         }
     return scheduler
+
+def save_batch_to_json(batch, output_dir, prefix="batch"):
+    """
+    Save batch data to JSON files, converting torch tensors to lists.
+    
+    Args:
+        batch (dict): Batch dictionary containing mixed data types
+        output_dir (str): Directory to save JSON files
+        prefix (str): Prefix for output filenames
+    """    
+    # Create output directory
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    serialized = defaultdict(list)
+    
+    serialized["c2w"] = batch["c2w"].cpu().numpy().tolist()
+    serialized["fovy"] = batch["fovy"].cpu().numpy().tolist()
+    serialized["width"] = batch["width"]
+    serialized["height"] = batch["height"]
+    
+        
+    # Save to file
+    output_file = os.path.join(output_dir, f"{prefix}_.json")
+    with open(output_file, 'w') as f:
+        json.dump(serialized, f, indent=2)

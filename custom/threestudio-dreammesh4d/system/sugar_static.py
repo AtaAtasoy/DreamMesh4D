@@ -1,3 +1,4 @@
+from collections import defaultdict
 import os
 import random
 from easydict import EasyDict
@@ -9,7 +10,7 @@ import torch
 import torch.nn.functional as F
 
 from threestudio.systems.utils import parse_optimizer
-from threestudio.utils.loss import tv_loss
+from threestudio.utils.loss import tv_loss, ssim
 from threestudio.utils.typing import *
 
 
@@ -19,6 +20,8 @@ from .base import BaseSuGaRSystem
 from ..geometry.gaussian_base import BasicPointCloud
 from ..geometry.sugar import SuGaRModel
 from ..utils.sugar_utils import SuGaRRegularizer
+from torchvision.utils import save_image
+from extern.ldm_zero123.modules.evaluate.evaluate_perceptualsim import perceptual_sim, ssim_metric, psnr
 
 
 @threestudio.register("sugar-static-system")
@@ -28,13 +31,15 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
         stage: str = "gaussian"
         freq: dict = field(default_factory=dict)
         ambient_ratio_min: float = 0.5
-        back_ground_color: Tuple[float, float, float] = (1, 1, 1)
-
+        back_ground_color: Tuple[float, float, float] = (0, 0, 0)
+        dynamic_stage: bool = False
+        
         # ==== SuGaR regularization configs for Gaussian stage ==== #
         use_sugar_reg: bool = True
         knn_to_track: int = 16
         n_samples_for_sugar_sdf_reg: int = 500000
-        # min_opac_prune: Any = 0.5
+        min_opac_prune: Any = 0.5
+        
 
     cfg: Config
 
@@ -64,9 +69,10 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
         self._render_type = "rgb"
         self.sugar_reg = None
         self.pearson = PearsonCorrCoef().to(self.device)
+        self.img_at_iteration = defaultdict(list)
 
         # Zero123
-        self.guidance = threestudio.find(self.cfg.guidance_type)(self.cfg.guidance)
+        # self.guidance = threestudio.find(self.cfg.guidance_type)(self.cfg.guidance)
 
     def on_load_checkpoint(self, checkpoint):
         if self.stage == "gaussian":
@@ -97,7 +103,7 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
 
     def on_train_batch_start(self, batch, batch_idx, unused=0):
         super().on_train_batch_start(batch, batch_idx, unused)
-        if self.stage == "gaussain" and self.cfg.use_sugar_reg and self.global_step >= self.cfg.freq.milestone_sugar_reg:
+        if self.stage == "gaussian" and self.cfg.use_sugar_reg and self.global_step >= self.cfg.freq.milestone_sugar_reg:
             self.sugar_reg = SuGaRRegularizer(
                 self.geometry, keep_track_of_knn=True, knn_to_track=self.cfg.knn_to_track
             )
@@ -122,28 +128,40 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
             shading = "diffuse"
             batch["shading"] = shading
         elif guidance == "rand":
-            batch = batch["random_camera"]
-            ambient_ratio = (
-                self.cfg.ambient_ratio_min
-                + (1 - self.cfg.ambient_ratio_min) * random.random()
-            )
+            ambient_ratio = 1.0
+            shading = "diffuse"
+            batch["shading"] = shading
 
         batch["ambient_ratio"] = ambient_ratio
 
         out = self(batch)
-
+        # Save the GS output
+        if batch_idx % 200 == 0:
+            self.save_image_grid(
+                f"train_rgb_{batch_idx}.png",
+                imgs=[
+                    {
+                        "type": "rgb",
+                        "img": out["comp_rgb"][0],
+                        "kwargs": {"data_format": "HWC"},
+                           
+                    },
+                    {
+                        "type": "rgb",
+                        "img": batch["rgb"][0],
+                        "kwargs": {"data_format": "HWC"},
+                           
+                    },                    
+                ]
+            )
+            # save_image(out_image, f"comp_rgb_{batch_idx}.png")
+        
         loss_prefix = f"loss_{guidance}_"
 
         loss_terms = {}
 
         def set_loss(name, value):
             loss_terms[f"{loss_prefix}{name}"] = value
-
-        guidance_eval = (
-            guidance == "rand"
-            and self.cfg.freq.guidance_eval > 0
-            and self.true_global_step % self.cfg.freq.guidance_eval == 0
-        )
 
         if guidance == "ref":
             gt_mask = batch["mask"]
@@ -155,6 +173,7 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
 
             # mask loss
             set_loss("mask", F.mse_loss(gt_mask.float(), out["comp_mask"]))
+            
 
             # depth loss
             if self.C(self.cfg.loss.lambda_depth) > 0:
@@ -190,16 +209,6 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
                 )
 
         elif guidance == "rand":
-            # zero123
-            guidance_out = self.guidance(
-                out["comp_rgb"],
-                **batch,
-                rgb_as_latents=False,
-                guidance_eval=guidance_eval,
-            )
-            # claforte: TODO: rename the loss_terms keys
-            set_loss("sds", guidance_out["loss_sds"])
-
             if self.C(self.cfg.loss.lambda_normal_smooth) > 0:
                 if "comp_normal" not in out:
                     raise ValueError(
@@ -239,7 +248,7 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
                     if use_sdf_normal_reg:
                         set_loss("sugar_sdf_normal_reg", dloss["normal_regulation"])
 
-
+            # Sugar Regularization
             if self.stage == "sugar":
                 surface_mesh = self.geometry.surface_mesh
                 if self.C(self.cfg.loss.lambda_normal_consistency) > 0:
@@ -327,12 +336,10 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
         out_rand = self.training_substep(batch, batch_idx, guidance="rand")
         total_loss += out_rand["loss"]
 
-
         self.log("train/loss", total_loss, prog_bar=True)
 
-
         if self.stage == "gaussian":
-            total_loss.backward()
+            total_loss.backward() # Never executed
 
             visibility_filter = out_rand["visibility_filter"]
             radii = out_rand["radii"]
@@ -351,10 +358,8 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
         return {"loss": total_loss}
 
     def validation_step(self, batch, batch_idx):
-
         def save_out_to_image_grid(filename, out):
             self.save_image_grid(
-                # f"it{self.true_global_step}-val/{batch['index'][0]}.png",
                 filename,
                 (
                     [
@@ -362,42 +367,66 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
                             "type": "rgb",
                             "img": batch["rgb"][0],
                             "kwargs": {"data_format": "HWC"},
+                        }, 
+                        {
+                            "type": "rgb",
+                            "img": out["comp_rgb"][0],
+                            "kwargs": {"data_format": "HWC"},
                         }
                     ]
                     if "rgb" in batch
                     else []
                 )
-                + [
-                    {
-                        "type": "rgb",
-                        "img": out["comp_rgb"][0],
-                        "kwargs": {"data_format": "HWC"},
-                    },
-                ]
+                +(
+                    [
+                        {
+                            "type": "grayscale",
+                            "img": batch["ref_depth"][0],
+                            "kwargs": {"cmap": None, "data_range": (0, 1)},
+                        }, 
+                        {
+                            "type": "grayscale",
+                            "img": out["comp_depth"][0, :, :, 0],
+                            "kwargs": {"cmap": None, "data_range": (0, 1)},
+                        }
+                    ]
+                   if self.C(self.cfg.loss.lambda_depth) > 0
+                    else []
+                )
                 + (
                     [
+                        {
+                            "type": "rgb",
+                            "img": batch["ref_normal"][0],
+                            "kwargs": {"data_format": "HWC", "data_range": (0, 1)},
+                        },
                         {
                             "type": "rgb",
                             "img": out["comp_normal"][0],
                             "kwargs": {"data_format": "HWC", "data_range": (0, 1)},
-                        }
+                        },
                     ]
-                    if "comp_normal" in out
+                   if self.C(self.cfg.loss.lambda_normal) > 0
                     else []
                 )
+                # + (
+                #     [
+                #         {
+                #             "type": "rgb",
+                #             "img": out["comp_normal_from_dist"][0],
+                #             "kwargs": {"data_format": "HWC", "data_range": (0, 1)},
+                #         }
+                #     ]
+                #     if "comp_normal_from_dist" in out
+                #     else []
+                # )
                 + (
                     [
                         {
-                            "type": "rgb",
-                            "img": out["comp_normal_from_dist"][0],
-                            "kwargs": {"data_format": "HWC", "data_range": (0, 1)},
-                        }
-                    ]
-                    if "comp_normal_from_dist" in out
-                    else []
-                )
-                + (
-                    [
+                            "type": "grayscale",
+                            "img": batch["mask"][0, :, :, 0],
+                            "kwargs": {"cmap": None, "data_range": (0, 1)},
+                        },
                         {
                             "type": "grayscale",
                             "img": out["comp_mask"][0, :, :, 0],
@@ -407,7 +436,6 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
                     if "comp_mask" in out
                     else []
                 ),
-                # claforte: TODO: don't hardcode the frame numbers to record... read them from cfg instead.
                 name=None,
                 step=self.true_global_step,
             )
@@ -418,9 +446,12 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
             }
         )
         out = self(batch)
-        save_out_to_image_grid(f"it{self.true_global_step}-val/{batch['index'][0]}.png", out)
-
-            
+        save_out_to_image_grid(f"it{self.true_global_step}-val/{batch_idx}.png", out)
+        psnr_val = psnr(img1=batch["rgb"], img2=out["comp_rgb"], mask=batch["mask"])
+        # (_, channel, _, _) = img1.size()
+        ssim = ssim_metric(img1=batch["rgb"].permute(0, 3, 1, 2), img2=out["comp_rgb"].permute(0, 3, 1, 2), mask=batch["mask"].permute(0, 3, 1, 2))
+        # perceptual_sim_val = perceptual_sim(img1=batch["rgb"], img2=out["comp_rgb"])
+        threestudio.info(f'PSNR: {psnr_val.item()}, SSIM: {ssim.item()}')
         
     def on_validation_epoch_end(self):
         filestem = f"it{self.true_global_step}-val"
@@ -429,7 +460,7 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
             filestem,
             "(\d+)\.png",
             save_format="mp4",
-            fps=30,
+            fps=10,
             name="validation_epoch_end",
             step=self.true_global_step,
         )
@@ -448,7 +479,7 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
         )
         out = self(batch)
         self.save_image_grid(
-            f"it{self.true_global_step}-test/{batch['index'][0]}.png",
+            f"it{self.true_global_step}-test/{batch_idx}.png",
             (
                 [
                     {
@@ -488,7 +519,7 @@ class SuGaRStaticSystem(BaseSuGaRSystem):
             f"it{self.true_global_step}-test",
             "(\d+)\.png",
             save_format="mp4",
-            fps=30,
+            fps=10,
             name="test",
             step=self.true_global_step,
         )

@@ -196,3 +196,8 @@ wandb/
 # custom/*
 
 load/tets/256_tets.npz
+
+input/
+overnight/
+rotated/
+lr_tuning/

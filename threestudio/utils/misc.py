@@ -9,7 +9,7 @@ from packaging import version
 
 from threestudio.utils.config import config_to_primitive
 from threestudio.utils.typing import *
-
+from json import load
 
 def parse_version(ver: str):
     return version.parse(ver)
@@ -159,3 +159,56 @@ def find_last_path(path: str):
             raise FileNotFoundError(new_path)
     else:
         return path
+
+def load_split_data(cfg, split: str, rank: torch.device):
+    """Load images and camera parameters for a specific data split."""
+    data_dir = getattr(cfg, f'{split}_data_path', None)
+    if not data_dir:
+        raise ValueError(f"{split} data directory must be provided via {split}_data_path config parameter")
+
+    # Validate and load images
+    images_dir = os.path.join(data_dir, 'rgb')
+    if not os.path.exists(images_dir):
+        raise ValueError(f"{split} images directory not found at {images_dir}")
+    
+    image_paths = [
+        os.path.join(images_dir, f.name) 
+        for f in os.scandir(images_dir) 
+        if f.name.endswith('.png')
+    ]
+    if len(image_paths) == 0:
+        raise ValueError(f"No PNG images found in {split} directory {images_dir}")
+
+    # Load camera parameters
+    camera_params_path = os.path.join(data_dir, f'{split}_camera_parameters.json')
+    if not os.path.exists(camera_params_path):
+        raise ValueError(f"Camera parameters file not found at {camera_params_path}")
+
+    with open(camera_params_path, 'r') as f:
+        camera_parameters = load(f)
+    
+    cam_2_world_poses = dict()
+    for serial, parameters in camera_parameters.items():
+        cam_2_world_poses[serial] = parameters["c2w_opengl"]
+    intrinsics = camera_parameters[serial]["K"]
+    
+    world_2_cam_poses = dict()
+    for serial, parameters in camera_parameters.items():
+        world_2_cam_poses[serial] = parameters["w2c_opencv"]
+    
+    full_proj_transforms = dict()
+    for serial, parameters in camera_parameters.items():
+        full_proj_transforms[serial] = parameters["full_proj_transform"]
+        
+    camera_centers = dict()
+    for serial, parameters in camera_parameters.items():
+        camera_centers[serial] = parameters["camera_center"]
+    
+    return {
+        'image_paths': image_paths,
+        'intrinsics': torch.FloatTensor(intrinsics).to(rank),
+        'cam_2_world_poses': cam_2_world_poses,
+        'world_2_cam_poses': world_2_cam_poses,
+        'full_proj_transforms': full_proj_transforms,
+        'camera_centers': camera_centers,
+    }

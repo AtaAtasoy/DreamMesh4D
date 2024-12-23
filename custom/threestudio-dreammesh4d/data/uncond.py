@@ -206,13 +206,13 @@ class RandomCameraIterableDataset(IterableDataset, Updateable):
         )
 
         # convert spherical coordinates to cartesian coordinates
-        # right hand coordinate system, x back, y right, z up
+        # right hand coordinate system, x right, y up, z back
         # elevation in (-90, 90), azimuth from +x to +y in (-180, 180)
         camera_positions: Float[Tensor, "B 3"] = torch.stack(
             [
                 camera_distances * torch.cos(elevation) * torch.cos(azimuth),
                 camera_distances * torch.cos(elevation) * torch.sin(azimuth),
-                camera_distances * torch.sin(elevation),
+                -camera_distances * torch.sin(elevation),
             ],
             dim=-1,
         )
@@ -220,7 +220,7 @@ class RandomCameraIterableDataset(IterableDataset, Updateable):
         # default scene center at origin
         center: Float[Tensor, "B 3"] = torch.zeros_like(camera_positions)
         # default camera up direction as +z
-        up: Float[Tensor, "B 3"] = torch.as_tensor([0, 0, 1], dtype=torch.float32)[
+        up: Float[Tensor, "B 3"] = torch.as_tensor([0, 1, 0], dtype=torch.float32)[
             None, :
         ].repeat(self.batch_size, 1)
 
@@ -329,7 +329,7 @@ class RandomCameraIterableDataset(IterableDataset, Updateable):
         )
 
         proj_mtx: Float[Tensor, "B 4 4"] = get_projection_matrix(
-            fovy, self.width / self.height, 0.1, 1000.0
+            fovy, self.width / self.height, 1.0, 100.0
         )  # FIXME: hard-coded near and far
         mvp_mtx: Float[Tensor, "B 4 4"] = get_mvp_matrix(c2w, proj_mtx)
 
@@ -380,21 +380,21 @@ class RandomCameraDataset(Dataset):
         azimuth = azimuth_deg * math.pi / 180
 
         # convert spherical coordinates to cartesian coordinates
-        # right hand coordinate system, x back, y right, z up
+        # right hand coordinate system, x right, y up, z back
         # elevation in (-90, 90), azimuth from +x to +y in (-180, 180)
         camera_positions: Float[Tensor, "B 3"] = torch.stack(
             [
-                camera_distances * torch.cos(elevation) * torch.cos(azimuth),
                 camera_distances * torch.cos(elevation) * torch.sin(azimuth),
                 camera_distances * torch.sin(elevation),
+                -camera_distances * torch.cos(elevation) * torch.cos(azimuth),
             ],
             dim=-1,
         )
 
         # default scene center at origin
         center: Float[Tensor, "B 3"] = torch.zeros_like(camera_positions)
-        # default camera up direction as +z
-        up: Float[Tensor, "B 3"] = torch.as_tensor([0, 0, 1], dtype=torch.float32)[
+        # default camera up direction as +y
+        up: Float[Tensor, "B 3"] = torch.as_tensor([0, 1, 0], dtype=torch.float32)[
             None, :
         ].repeat(self.cfg.eval_batch_size, 1)
 
@@ -415,7 +415,7 @@ class RandomCameraDataset(Dataset):
             [c2w3x4, torch.zeros_like(c2w3x4[:, :1])], dim=1
         )
         c2w[:, 3, 3] = 1.0
-        
+
         # get directions by dividing directions_unit_focal by focal length
         focal_length: Float[Tensor, "B"] = (
             0.5 * self.cfg.eval_height / torch.tan(0.5 * fovy)
@@ -434,7 +434,7 @@ class RandomCameraDataset(Dataset):
             directions, c2w, keepdim=True, normalize=self.cfg.rays_d_normalize
         )
         proj_mtx: Float[Tensor, "B 4 4"] = get_projection_matrix(
-            fovy, self.cfg.eval_width / self.cfg.eval_height, 0.1, 1000.0
+            fovy, self.cfg.eval_width / self.cfg.eval_height, 1.0, 100.0
         )  # FIXME: hard-coded near and far
         mvp_mtx: Float[Tensor, "B 4 4"] = get_mvp_matrix(c2w, proj_mtx)
 

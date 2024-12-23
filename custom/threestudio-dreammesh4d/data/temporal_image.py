@@ -43,7 +43,7 @@ class TemporalRandomImageDataModuleConfig(SingleImageDataModuleConfig):
     video_length: int = 14
     num_frames: int = 14
     norm_timestamp: bool = False
-    white_background: bool = True
+    white_background: bool = False
 
 class TemporalRandomImageIterableDataset(IterableDataset, Updateable):
     def __init__(self, cfg: Any, split: str) -> None:
@@ -91,13 +91,13 @@ class TemporalRandomImageIterableDataset(IterableDataset, Updateable):
             [
                 camera_distance * torch.cos(elevation) * torch.cos(azimuth),
                 camera_distance * torch.cos(elevation) * torch.sin(azimuth),
-                camera_distance * torch.sin(elevation),
+                -camera_distance * torch.sin(elevation),
             ],
             dim=-1,
         )
 
         center: Float[Tensor, "1 3"] = torch.zeros_like(camera_position)
-        up: Float[Tensor, "1 3"] = torch.as_tensor([0, 0, 1], dtype=torch.float32)[None]
+        up: Float[Tensor, "1 3"] = torch.as_tensor([0, 1, 0], dtype=torch.float32)[None]
 
         light_position: Float[Tensor, "1 3"] = camera_position
         lookat: Float[Tensor, "1 3"] = F.normalize(center - camera_position, dim=-1)
@@ -434,7 +434,7 @@ class TemporalRandomCameraDataset(Dataset):
             directions, c2w, keepdim=True, normalize=self.cfg.rays_d_normalize
         )
         proj_mtx: Float[Tensor, "B 4 4"] = get_projection_matrix(
-            fovy, self.cfg.eval_width / self.cfg.eval_height, 0.1, 1000.0
+            fovy, self.cfg.eval_width / self.cfg.eval_height, 1.0, 100.0
         )  # FIXME: hard-coded near and far
         mvp_mtx: Float[Tensor, "B 4 4"] = get_mvp_matrix(c2w, proj_mtx)
 
@@ -511,11 +511,11 @@ class TemporalRandomImageDataModule(pl.LightningDataModule):
             # self.predict_dataset = RandomCameraIterableDataset(cfg)
             cfg.update(
                 {
-                    "predict_height": 1024,
-                    "predict_width": 1024,
+                    "predict_height": 256,
+                    "predict_width": 256,
                     "predict_azimuth_range": (-180, 180),
                     "predict_elevation_range": (-10, 80),
-                    "predict_camera_distance_range": (3.8, 3.8),
+                    "predict_camera_distance_range": (2.7, 2.7),
                     "n_predict_views": 120,
                 }
             )

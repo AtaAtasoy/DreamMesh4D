@@ -8,7 +8,7 @@ import threestudio
 import torch
 import torch.nn.functional as F
 
-from threestudio.systems.utils import parse_optimizer
+from threestudio.systems.utils import parse_optimizer, save_batch_to_json
 from threestudio.utils.loss import tv_loss
 from threestudio.utils.typing import *
 from threestudio.utils.misc import C
@@ -22,6 +22,7 @@ from pytorch3d.loss import mesh_normal_consistency, mesh_laplacian_smoothing
 from ..utils.arap_utils import ARAPCoach
 from .base import BaseSuGaRSystem
 from torchmetrics import PeakSignalNoiseRatio
+from torchvision.utils import save_image
 
 
 
@@ -47,11 +48,13 @@ class SuGaR4DGen(BaseSuGaRSystem):
         freq: dict = field(default_factory=dict)
         refinement: bool = False
         ambient_ratio_min: float = 0.5
-        back_ground_color: Tuple[float, float, float] = (1, 1, 1)
+        back_ground_color: Tuple[float, float, float] = (0, 0, 0)
 
         # Intermediate frames
         num_inter_frames: int = 10
         length_inter_frames: float = 0.2
+        
+        dynamic_stage: bool = True
 
 
     cfg: Config
@@ -83,8 +86,8 @@ class SuGaR4DGen(BaseSuGaRSystem):
     def on_fit_start(self) -> None:
         super().on_fit_start()
         # no prompt processor
+        print(f"Fit start.")
         self.guidance_zero123 = threestudio.find(self.cfg.guidance_zero123_type)(self.cfg.guidance_zero123)
-
         # Maybe use ImageDream
         self.enable_imagedream = self.cfg.guidance_3d_type is not None and C(self.cfg.loss.lambda_sds_3d, 0, 0) > 0
         if self.enable_imagedream:
@@ -140,9 +143,9 @@ class SuGaR4DGen(BaseSuGaRSystem):
                 self.cfg.ambient_ratio_min
                 + (1 - self.cfg.ambient_ratio_min) * random.random()
             )
+            save_batch_to_json(batch=batch, output_dir="output/batches", prefix=f"camera_batch")
 
         batch["ambient_ratio"] = ambient_ratio
-
         out = self(batch)
 
         loss_prefix = f"loss_{guidance}_"
@@ -163,7 +166,7 @@ class SuGaR4DGen(BaseSuGaRSystem):
             gt_rgb = batch["rgb"]
 
             # color loss
-            # gt_rgb = gt_rgb * gt_mask.float()
+            #gt_rgb = gt_rgb * gt_mask.float()
 
             set_loss("rgb", F.mse_loss(gt_rgb, out["comp_rgb"]))
             # mask loss
@@ -238,6 +241,43 @@ class SuGaR4DGen(BaseSuGaRSystem):
                 guidance_eval=guidance_eval,
             )
             set_loss("sds_zero123", guidance_out["loss_sds"])
+
+            zero123_img = out["comp_rgb"]
+            if self.true_global_step % 200 == 0:
+                img1, img2, img3, img4 = zero123_img[0], zero123_img[1], zero123_img[2], zero123_img[3]
+                self.save_image_grid(
+                    f"dynamic_rgb_{self.true_global_step}.png",
+                    imgs=[
+                        {
+                            "type": "rgb",
+                            "img": img1,
+                            "kwargs": {"data_format": "HWC"},
+                            
+                        },
+                        {
+                            "type": "rgb",
+                            "img": img2,
+                            "kwargs": {"data_format": "HWC"},
+                            
+                        },
+                        {
+                            "type": "rgb",
+                            "img": img3,
+                            "kwargs": {"data_format": "HWC"},
+                        },
+                        {
+                            "type": "rgb",
+                            "img": img4,
+                            "kwargs": {"data_format": "HWC"},
+                        },                    
+                    ]
+                )
+                
+                self.save_image(f"dynamic_rgb_{self.true_global_step}_1.png", img1)
+                self.save_image(f"dynamic_rgb_{self.true_global_step}_2.png", img2)
+                self.save_image(f"dynamic_rgb_{self.true_global_step}_3.png", img3)
+                self.save_image(f"dynamic_rgb_{self.true_global_step}_4.png", img4)
+                
 
         # Regularization
         if (
@@ -619,8 +659,8 @@ class SuGaR4DGen(BaseSuGaRSystem):
                 textures=textures_uv
             )
             
-            # threestudio.info("Texture extracted.")        
-            # threestudio.info("Saving textured mesh...")
+            threestudio.info("Texture extracted.")        
+            threestudio.info("Saving textured mesh...")
             
             mesh_save_path = os.path.join(
                 mesh_save_dir, f"extracted_mesh_{i}.obj"

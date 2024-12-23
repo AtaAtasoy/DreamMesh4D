@@ -18,6 +18,7 @@ from pytorch3d.ops import knn_points
 from pytorch3d.transforms import matrix_to_quaternion, quaternion_to_matrix
 from pytorch3d.structures import Meshes
 from pytorch3d.renderer import TexturesUV, TexturesVertex
+from pytorch3d.io import load_objs_as_meshes, save_ply
 
 from .gaussian_base import SH2RGB, RGB2SH
 from ..utils.sugar_utils import get_one_ring_neighbors
@@ -68,6 +69,7 @@ class SuGaRModel(BaseGeometry):
         pred_normal: bool = False
 
         init_gs_scales_s: float = 1.7
+        dynamic_stage: bool = False
 
     cfg: Config
 
@@ -78,6 +80,7 @@ class SuGaRModel(BaseGeometry):
         # Color features
         self._sh_coordinates_dc = torch.empty(0)
         self._sh_coordinates_rest = torch.empty(0)
+        self.dynamic_stage = self.cfg.dynamic_stage
 
         if self.cfg.surface_mesh_to_bind_path is not None:
             self.binded_to_surface_mesh = True
@@ -173,18 +176,52 @@ class SuGaRModel(BaseGeometry):
         # Load mesh with open3d
         threestudio.info(f"Loading mesh to bind from: {self.cfg.surface_mesh_to_bind_path}...")
         if mesh is None:
-            o3d_mesh = o3d.io.read_triangle_mesh(self.cfg.surface_mesh_to_bind_path)
+            torch3d_mesh = load_objs_as_meshes([self.cfg.surface_mesh_to_bind_path], device=self.device)
+            verts = torch3d_mesh.verts_packed()
+            center = verts.mean(0)
+            torch3d_mesh.offset_verts_(-center)
+            
+            verts = torch3d_mesh.verts_packed()
+            scale = verts.norm(dim=1).max()
+            torch3d_mesh.scale_verts_((1.0 / float(scale)))
+            
+            read_mesh = o3d.io.read_triangle_mesh(self.cfg.surface_mesh_to_bind_path)
+            read_mesh.vertices = o3d.utility.Vector3dVector(torch3d_mesh.verts_packed().cpu().numpy())
+            read_mesh.triangles = o3d.utility.Vector3iVector(torch3d_mesh.faces_packed().cpu().numpy())
+            if not read_mesh.has_vertex_normals():
+                read_mesh.compute_vertex_normals()
+            threestudio.info(f"Mesh information: {read_mesh}")
+                        
+            # Check if the center is at (0, 0, 0)
+            threestudio.info(f"Center of the mesh: {read_mesh.get_center()}")
+            # assert np.allclose(read_mesh.get_center(), np.array([0, 0, 0]), atol=1e-3)
+            
+            o3d_mesh = o3d.geometry.TriangleMesh()
+            o3d_mesh.vertices = read_mesh.vertices
+            o3d_mesh.triangles = read_mesh.triangles
+            o3d_mesh.triangle_material_ids = read_mesh.triangle_material_ids
+            o3d_mesh.vertex_colors = read_mesh.vertex_colors
+            o3d_mesh.textures = [read_mesh.textures[1], read_mesh.textures[1]] 
+            
+            threestudio.info(f"o3d_mesh information: {o3d_mesh}")
+    
+            # Rotate the mesh to achieve canonical pose in openCV 
+            if self.dynamic_stage:
+                threestudio.info("We are in the dynamic stage, rotating the mesh")
         else:
+            threestudio.info(f"Ran this code")
             o3d_mesh = mesh
-
+            
         verts = np.array(o3d_mesh.vertices)
         faces = np.array(o3d_mesh.triangles)
         vert_colors = np.array(o3d_mesh.vertex_colors)
+                    
         if len(vert_colors) == 0:
+            threestudio.info(f"Mesh to bind from: {self.cfg.surface_mesh_to_bind_path} doesn't have any vertex colors!")
             vert_colors = np.ones_like(verts) * 0.5
-        verts, faces, vert_colors = self.prune_isolated_points(
-            verts, faces, vert_colors
-        )
+        # verts, faces, vert_colors = self.prune_isolated_points(
+        #     verts, faces, vert_colors
+        # )
         self.register_buffer(
             "_surface_mesh_faces", torch.as_tensor(faces, device=self.device)
         )
@@ -519,7 +556,7 @@ class SuGaRModel(BaseGeometry):
 
     @property
     def get_face_normals(self) -> Float[Tensor, "N_faces 3"]:
-        return F.normalize(self.surface_mesh.faces_normals_list()[0], dim=-1)
+        return - F.normalize(self.surface_mesh.faces_normals_list()[0], dim=-1)
 
     @property
     def get_gs_normals(self) -> Float[Tensor, "N_gs 3"]:

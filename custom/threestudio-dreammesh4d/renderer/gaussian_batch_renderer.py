@@ -3,6 +3,8 @@ from threestudio.utils.ops import get_cam_info_gaussian
 from torch.cuda.amp import autocast
 
 from ..geometry.gaussian_base import BasicPointCloud, Camera
+from PIL import Image
+import os
 
 
 class GaussianBatchRenderer:
@@ -21,9 +23,11 @@ class GaussianBatchRenderer:
         for batch_idx in range(bs):
             batch["batch_idx"] = batch_idx
             fovy = batch["fovy"][batch_idx]
+            
             w2c, proj, cam_p = get_cam_info_gaussian(
-                c2w=batch["c2w"][batch_idx], fovx=fovy, fovy=fovy, znear=0.1, zfar=100
-            )
+                c2w=batch["c2w"][batch_idx], fovx=fovy, fovy=fovy, znear=1.0, zfar=100
+            ) # pytorch3d uses znear=1.0 and zfar=100
+            # w2c, proj, cam_p = batch["w2c"], batch["full_proj_transform"], batch["camera_center"]
             
             if batch.__contains__("timestamp"):
                 timestamp = batch["timestamp"][batch_idx]
