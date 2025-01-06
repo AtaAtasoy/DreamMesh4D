@@ -1,11 +1,11 @@
 name: "sugar-dynamic"
 tag: "${data.random_camera.height}_${rmspace:${basename:${data.video_frames_dir}}_${system.geometry.dynamic_mode},_}"
-exp_root_dir: "/mnt/hdd/DreamMesh4D"
+exp_root_dir: "outputs"
 seed: 61
 
 data_type: "temporal-image-datamodule"
 data: # threestudio/data/image.py -> SingleImageDataModuleConfig
-  video_frames_dir: /home/atasoy/mesh-to-4d/video-diffusion/videos_second_pass/ConsistI2V/cow_walking/sample_frames
+  video_frames_dir: ???
   video_length: 32
   norm_timestamp: true
   num_frames: 4
@@ -13,10 +13,10 @@ data: # threestudio/data/image.py -> SingleImageDataModuleConfig
   width: 256
   resolution_milestones: [100]
   use_random_camera: True
-  default_elevation_deg: 0.0
+  default_elevation_deg: 5.0
   default_azimuth_deg: 0.0
-  default_camera_distance: 2.7
-  default_fovy_deg: 60.0
+  default_camera_distance: 3.8
+  default_fovy_deg: 20.0
   requires_depth: ${cmaxgt0orcmaxgt0:${system.loss.lambda_depth},${system.loss.lambda_depth_rel}}
   requires_normal: ${cmaxgt0:${system.loss.lambda_normal}}
   random_camera: # threestudio/data/uncond.py -> RandomCameraDataModuleConfig
@@ -28,8 +28,8 @@ data: # threestudio/data/image.py -> SingleImageDataModuleConfig
     eval_batch_size: 1
     elevation_range: [-10, 80]
     azimuth_range: [-180, 180]
-    camera_distance_range: [2.7, 2.7]
-    fovy_range: [60.0, 60.0] # Zero123 has fixed fovy
+    camera_distance_range: [3.8, 3.8]
+    fovy_range: [20.0, 20.0] # Zero123 has fixed fovy
     progressive_until: 0
     camera_perturb: 0.0
     center_perturb: 0.0
@@ -80,7 +80,7 @@ system:
     spatial_extent: ${data.default_camera_distance}
     spatial_lr_scale: 1
 
-    surface_mesh_to_bind_path: "input/meshes/cow/cow.obj"
+    surface_mesh_to_bind_path: ???
     n_gaussians_per_surface_triangle: 6
 
     dist_mode: "geodisc" # (eucdisc / geodisc)
@@ -91,7 +91,8 @@ system:
   renderer_type: "diff-sugar-rasterizer-temporal"
   renderer:
     debug: false
-    invert_bg_prob: 0.0
+    invert_bg_prob: 1.0
+    back_ground_color: [0.0, 0.0, 0.0]
 
   material_type: "no-material" # unused
   material:
@@ -108,7 +109,7 @@ system:
   guidance_zero123:
     num_frames: ${data.video_length}
     pretrained_config: "./load/zero123/sd-objaverse-finetune-c_concat-256.yaml"
-    pretrained_model_name_or_path: /home/atasoy/mesh-to-4d/DreamMesh4D/load/zero123/stable_zero123.ckpt
+    pretrained_model_name_or_path: ???
     vram_O: ${not:${gt0:${system.freq.guidance_eval}}}
     cond_video_dir: ${data.video_frames_dir}
     cond_elevation_deg: ${data.default_elevation_deg}
