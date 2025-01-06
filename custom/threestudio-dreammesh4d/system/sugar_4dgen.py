@@ -272,11 +272,11 @@ class SuGaR4DGen(BaseSuGaRSystem):
                         },                    
                     ]
                 )
-                save_batch_to_json(batch=batch, output_dir="output/batches", prefix=f"camera_batch")
-                save_image(img1.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_1.png")
-                save_image(img2.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_2.png")
-                save_image(img3.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_3.png")
-                save_image(img4.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_4.png")
+                # save_batch_to_json(batch=batch, output_dir="output/batches", prefix=f"camera_batch")
+                # save_image(img1.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_1.png")
+                # save_image(img2.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_2.png")
+                # save_image(img3.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_3.png")
+                # save_image(img4.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_4.png")
                 
                 
                 # self.save_image(f"dynamic_rgb_{self.true_global_step}_1.png", img1)
