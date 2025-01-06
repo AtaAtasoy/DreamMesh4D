@@ -1,5 +1,8 @@
 import numpy as np
 import threestudio
+from pytorch3d.structures import Meshes, utils
+from pytorch3d.renderer import TexturesUV, TexturesVertex
+import torch
 
 
 def poisson_mesh_reconstruction(points, normals=None):
@@ -148,3 +151,8 @@ def clean_mesh(
     )
 
     return verts, faces
+
+def convert_to_textureVertex(textures_uv: TexturesUV, meshes:Meshes) -> TexturesVertex:
+    verts_colors_packed = torch.zeros_like(meshes.verts_packed())
+    verts_colors_packed[meshes.faces_packed()] = textures_uv.faces_verts_textures_packed()  # (*)
+    return TexturesVertex(utils.packed_to_list(verts_colors_packed, meshes.num_verts_per_mesh()))

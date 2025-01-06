@@ -21,6 +21,7 @@ from threestudio.utils.ops import (
     get_projection_matrix,
     get_ray_directions,
     get_rays,
+    convert_pose,
 )
 
 from threestudio.utils.typing import *
@@ -89,9 +90,9 @@ class TemporalRandomImageIterableDataset(IterableDataset, Updateable):
         azimuth = azimuth_deg * math.pi / 180
         camera_position: Float[Tensor, "1 3"] = torch.stack(
             [
-                camera_distance * torch.cos(elevation) * torch.cos(azimuth),
                 camera_distance * torch.cos(elevation) * torch.sin(azimuth),
-                -camera_distance * torch.sin(elevation),
+                camera_distance * torch.sin(elevation),
+                camera_distance * torch.cos(elevation) * torch.cos(azimuth),
             ],
             dim=-1,
         )
@@ -104,14 +105,14 @@ class TemporalRandomImageIterableDataset(IterableDataset, Updateable):
         right: Float[Tensor, "1 3"] = F.normalize(torch.cross(lookat, up), dim=-1)
         up = F.normalize(torch.cross(right, lookat), dim=-1)
         self.c2w: Float[Tensor, "1 3 4"] = torch.cat(
-            [torch.stack([right, up, -lookat], dim=-1), camera_position[:, :, None]],
+            [torch.stack([right, -up, lookat], dim=-1), camera_position[:, :, None]],
             dim=-1,
         )
         self.c2w4x4: Float[Tensor, "B 4 4"] = torch.cat(
             [self.c2w, torch.zeros_like(self.c2w[:, :1])], dim=1
         )
         self.c2w4x4[:, 3, 3] = 1.0
-
+        
         self.camera_position = camera_position
         self.light_position = light_position
         self.elevation_deg, self.azimuth_deg = elevation_deg, azimuth_deg
@@ -171,7 +172,7 @@ class TemporalRandomImageIterableDataset(IterableDataset, Updateable):
         )
 
         proj_mtx: Float[Tensor, "4 4"] = get_projection_matrix(
-            self.fovy, self.width / self.height, 0.1, 100.0
+            self.fovy, self.width / self.height, 0.1, 1000.0
         )  # FIXME: hard-coded near and far
         mvp_mtx: Float[Tensor, "4 4"] = get_mvp_matrix(self.c2w4x4, proj_mtx)
 
@@ -384,9 +385,9 @@ class TemporalRandomCameraDataset(Dataset):
         # elevation in (-90, 90), azimuth from +x to +y in (-180, 180)
         camera_positions: Float[Tensor, "B 3"] = torch.stack(
             [
-                camera_distances * torch.cos(elevation) * torch.cos(azimuth),
                 camera_distances * torch.cos(elevation) * torch.sin(azimuth),
                 camera_distances * torch.sin(elevation),
+                camera_distances * torch.cos(elevation) * torch.cos(azimuth),
             ],
             dim=-1,
         )
@@ -394,7 +395,7 @@ class TemporalRandomCameraDataset(Dataset):
         # default scene center at origin
         center: Float[Tensor, "B 3"] = torch.zeros_like(camera_positions)
         # default camera up direction as +z
-        up: Float[Tensor, "B 3"] = torch.as_tensor([0, 0, 1], dtype=torch.float32)[
+        up: Float[Tensor, "B 3"] = torch.as_tensor([0, 1, 0], dtype=torch.float32)[
             None, :
         ].repeat(self.cfg.eval_batch_size, 1)
 
@@ -408,13 +409,15 @@ class TemporalRandomCameraDataset(Dataset):
         right: Float[Tensor, "B 3"] = F.normalize(torch.cross(lookat, up), dim=-1)
         up = F.normalize(torch.cross(right, lookat), dim=-1)
         c2w3x4: Float[Tensor, "B 3 4"] = torch.cat(
-            [torch.stack([right, up, -lookat], dim=-1), camera_positions[:, :, None]],
+            [torch.stack([right, -up, lookat], dim=-1), camera_positions[:, :, None]],
             dim=-1,
         )
         c2w: Float[Tensor, "B 4 4"] = torch.cat(
             [c2w3x4, torch.zeros_like(c2w3x4[:, :1])], dim=1
         )
         c2w[:, 3, 3] = 1.0
+        
+        # c2w = convert_pose(c2w)
 
         # get directions by dividing directions_unit_focal by focal length
         focal_length: Float[Tensor, "B"] = (
@@ -434,7 +437,7 @@ class TemporalRandomCameraDataset(Dataset):
             directions, c2w, keepdim=True, normalize=self.cfg.rays_d_normalize
         )
         proj_mtx: Float[Tensor, "B 4 4"] = get_projection_matrix(
-            fovy, self.cfg.eval_width / self.cfg.eval_height, 1.0, 100.0
+            fovy, self.cfg.eval_width / self.cfg.eval_height, 0.1, 1000.0
         )  # FIXME: hard-coded near and far
         mvp_mtx: Float[Tensor, "B 4 4"] = get_mvp_matrix(c2w, proj_mtx)
 
@@ -511,11 +514,11 @@ class TemporalRandomImageDataModule(pl.LightningDataModule):
             # self.predict_dataset = RandomCameraIterableDataset(cfg)
             cfg.update(
                 {
-                    "predict_height": 256,
-                    "predict_width": 256,
+                    "predict_height": 1024,
+                    "predict_width": 1024,
                     "predict_azimuth_range": (-180, 180),
                     "predict_elevation_range": (-10, 80),
-                    "predict_camera_distance_range": (2.7, 2.7),
+                    "predict_camera_distance_range": (3.8, 3.8),
                     "n_predict_views": 120,
                 }
             )

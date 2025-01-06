@@ -122,10 +122,14 @@ def save_batch_to_json(batch, output_dir, prefix="batch"):
     
     serialized["c2w"] = batch["c2w"].cpu().numpy().tolist()
     serialized["fovy"] = batch["fovy"].cpu().numpy().tolist()
-    serialized["width"] = batch["width"]
-    serialized["height"] = batch["height"]
-    
+    if torch.is_tensor(batch["width"]):
+        serialized["width"] = batch["width"].cpu().item()
+        serialized["height"] = batch["height"].cpu().item()
+    else:
+        serialized["width"] = batch["width"]
+        serialized["height"] = batch["height"]
         
+    
     # Save to file
     output_file = os.path.join(output_dir, f"{prefix}_.json")
     with open(output_file, 'w') as f:

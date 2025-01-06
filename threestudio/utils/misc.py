@@ -189,7 +189,7 @@ def load_split_data(cfg, split: str, rank: torch.device):
     
     cam_2_world_poses = dict()
     for serial, parameters in camera_parameters.items():
-        cam_2_world_poses[serial] = parameters["c2w_opengl"]
+        cam_2_world_poses[serial] = parameters["c2w_opencv"]
     intrinsics = camera_parameters[serial]["K"]
     
     world_2_cam_poses = dict()

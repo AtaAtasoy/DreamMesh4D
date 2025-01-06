@@ -266,4 +266,3 @@ class DualQuaternion(object):
     def dq_array(self):
         return torch.cat([self.q_r.tensor(), self.q_d.tensor()], dim=-1)
 
-

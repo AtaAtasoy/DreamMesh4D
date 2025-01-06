@@ -23,6 +23,7 @@ from ..utils.arap_utils import ARAPCoach
 from .base import BaseSuGaRSystem
 from torchmetrics import PeakSignalNoiseRatio
 from torchvision.utils import save_image
+from PIL import Image
 
 
 
@@ -143,7 +144,6 @@ class SuGaR4DGen(BaseSuGaRSystem):
                 self.cfg.ambient_ratio_min
                 + (1 - self.cfg.ambient_ratio_min) * random.random()
             )
-            save_batch_to_json(batch=batch, output_dir="output/batches", prefix=f"camera_batch")
 
         batch["ambient_ratio"] = ambient_ratio
         out = self(batch)
@@ -272,11 +272,22 @@ class SuGaR4DGen(BaseSuGaRSystem):
                         },                    
                     ]
                 )
+                save_batch_to_json(batch=batch, output_dir="output/batches", prefix=f"camera_batch")
+                save_image(img1.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_1.png")
+                save_image(img2.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_2.png")
+                save_image(img3.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_3.png")
+                save_image(img4.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_4.png")
                 
-                self.save_image(f"dynamic_rgb_{self.true_global_step}_1.png", img1)
-                self.save_image(f"dynamic_rgb_{self.true_global_step}_2.png", img2)
-                self.save_image(f"dynamic_rgb_{self.true_global_step}_3.png", img3)
-                self.save_image(f"dynamic_rgb_{self.true_global_step}_4.png", img4)
+                
+                # self.save_image(f"dynamic_rgb_{self.true_global_step}_1.png", img1)
+                # self.save_image(f"dynamic_rgb_{self.true_global_step}_2.png", img2)
+                # self.save_image(f"dynamic_rgb_{self.true_global_step}_3.png", img3)
+                # self.save_image(f"dynamic_rgb_{self.true_global_step}_4.png", img4)
+
+                # self.save_image(f"dynamic_rgb_{self.true_global_step}_1.png", img1)
+                # self.save_image(f"dynamic_rgb_{self.true_global_step}_2.png", img2)
+                # self.save_image(f"dynamic_rgb_{self.true_global_step}_3.png", img3)
+                # self.save_image(f"dynamic_rgb_{self.true_global_step}_4.png", img4)
                 
 
         # Regularization
@@ -530,6 +541,7 @@ class SuGaR4DGen(BaseSuGaRSystem):
                 }
             )
             out = self(batch)
+            save_batch_to_json(batch=batch, output_dir="output/val_batches", prefix=f"val_camera_batch_{i}")
             save_out_to_image_grid(f"it{self.true_global_step}-val/vid-azi{azimuth}/{i}.png", out)
 
 
@@ -632,25 +644,23 @@ class SuGaR4DGen(BaseSuGaRSystem):
 
 
     def on_predict_epoch_end(self) -> None:
-        self.texture_img = self.texture_img / self.texture_counter.clamp(min=1)
+        #self.texture_img = self.texture_img / self.texture_counter.clamp(min=1)
+        img_path = '/home/atasoy/DreamMesh4D/input/meshes/cow/cow_texture.png'
+        self.texture_img = torch.tensor(np.array(Image.open(img_path)).astype(np.float32) / 255.0).to(self.device)
 
         video_length = 32
         timestamps = torch.as_tensor(
             np.linspace(0, 1, video_length+2, endpoint=True), dtype=torch.float32
         )[1:-1].to(self.device)
-
-        textures_uv = TexturesUV(
-            maps=self.texture_img[None],
-            verts_uvs=self.verts_uv[None],
-            faces_uvs=self.faces_uv[None],
-            sampling_mode='nearest',
-        )
-
+        
+        textures_uv = self.surface_mesh.textures
+        
         mesh_save_dir = os.path.join(self.get_save_dir(), f"extracted_textured_meshes")
         os.makedirs(mesh_save_dir, exist_ok=True)
         for i, t in enumerate(timestamps):
 
             timed_surface_mesh = self.geometry.get_timed_surface_mesh(timestamps[i:i+1])
+            threestudio.info(timed_surface_mesh.textures)
             verts = timed_surface_mesh.verts_list()[0]
             faces = timed_surface_mesh.faces_list()[0]
             textured_mesh = Meshes(

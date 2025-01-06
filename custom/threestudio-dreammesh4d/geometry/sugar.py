@@ -15,14 +15,15 @@ from threestudio.utils.typing import *
 
 import open3d as o3d
 from pytorch3d.ops import knn_points
-from pytorch3d.transforms import matrix_to_quaternion, quaternion_to_matrix
-from pytorch3d.structures import Meshes
+from pytorch3d.transforms import matrix_to_quaternion, quaternion_to_matrix , Rotate, Transform3d
+from pytorch3d.structures import Meshes, utils
 from pytorch3d.renderer import TexturesUV, TexturesVertex
 from pytorch3d.io import load_objs_as_meshes, save_ply
 
 from .gaussian_base import SH2RGB, RGB2SH
 from ..utils.sugar_utils import get_one_ring_neighbors
-
+from .mesh_utils import convert_to_textureVertex
+from pathlib import Path
 
 def inverse_sigmoid(x):
     return torch.log(x / (1 - x))
@@ -165,7 +166,7 @@ class SuGaRModel(BaseGeometry):
 
     def create_from_3dgs(self):
         ...
-
+        
     def load_surface_mesh_to_bind(self, mesh=None):
         self.binded_to_surface_mesh = True
         self.learn_positions = self.cfg.learn_surface_mesh_positions
@@ -176,18 +177,25 @@ class SuGaRModel(BaseGeometry):
         # Load mesh with open3d
         threestudio.info(f"Loading mesh to bind from: {self.cfg.surface_mesh_to_bind_path}...")
         if mesh is None:
+            
             torch3d_mesh = load_objs_as_meshes([self.cfg.surface_mesh_to_bind_path], device=self.device)
+            
             verts = torch3d_mesh.verts_packed()
             center = verts.mean(0)
             torch3d_mesh.offset_verts_(-center)
             
             verts = torch3d_mesh.verts_packed()
-            scale = verts.norm(dim=1).max()
-            torch3d_mesh.scale_verts_((1.0 / float(scale)))
+            scale = max(verts.max().item(), abs(verts.min().item()))
+
+            torch3d_mesh.scale_verts_((0.5 / float(scale)))
+                        
+            # threestudio.info(f"torch3d_mesh_textures: {torch3d_mesh.textures}")
             
             read_mesh = o3d.io.read_triangle_mesh(self.cfg.surface_mesh_to_bind_path)
             read_mesh.vertices = o3d.utility.Vector3dVector(torch3d_mesh.verts_packed().cpu().numpy())
             read_mesh.triangles = o3d.utility.Vector3iVector(torch3d_mesh.faces_packed().cpu().numpy())
+            # read_mesh.vertex_colors = o3d.utility.Vector3dVector(torch3d_mesh.textures.verts_features_packed().cpu().numpy())
+            
             if not read_mesh.has_vertex_normals():
                 read_mesh.compute_vertex_normals()
             threestudio.info(f"Mesh information: {read_mesh}")
@@ -203,11 +211,28 @@ class SuGaRModel(BaseGeometry):
             o3d_mesh.vertex_colors = read_mesh.vertex_colors
             o3d_mesh.textures = [read_mesh.textures[1], read_mesh.textures[1]] 
             
+            # # Center the mesh
+            # vertices = np.asarray(o3d_mesh.vertices)
+            # mesh_center = (vertices.max(axis=0) + vertices.min(axis=0)) / 2
+            # vertices -= mesh_center
+            # o3d_mesh.vertices = o3d.utility.Vector3dVector(vertices)
+
+            # # Scale the mesh to fit inside the [-0.5, 0.5] cube
+            # max_extent = vertices.max() - vertices.min()
+            # scaling_factor = 1.0 / max_extent
+            # vertices *= scaling_factor
+            # o3d_mesh.vertices = o3d.utility.Vector3dVector(vertices)
+
+            # # Verify the mesh is within the cube
+            # bounds = np.asarray(o3d_mesh.get_axis_aligned_bounding_box().get_box_points())
+            # assert np.all(bounds >= -0.5) and np.all(bounds <= 0.5), "Mesh is not within the unit cube!"
+
             threestudio.info(f"o3d_mesh information: {o3d_mesh}")
     
             # Rotate the mesh to achieve canonical pose in openCV 
             if self.dynamic_stage:
                 threestudio.info("We are in the dynamic stage, rotating the mesh")
+
         else:
             threestudio.info(f"Ran this code")
             o3d_mesh = mesh
@@ -215,6 +240,8 @@ class SuGaRModel(BaseGeometry):
         verts = np.array(o3d_mesh.vertices)
         faces = np.array(o3d_mesh.triangles)
         vert_colors = np.array(o3d_mesh.vertex_colors)
+        self.surface_mesh_o3d = o3d_mesh
+        self.surface_mesh_torch3d = torch3d_mesh
                     
         if len(vert_colors) == 0:
             threestudio.info(f"Mesh to bind from: {self.cfg.surface_mesh_to_bind_path} doesn't have any vertex colors!")
@@ -614,13 +641,14 @@ class SuGaRModel(BaseGeometry):
     @property
     def surface_mesh(self):
         # Create a Meshes object
-        surface_mesh = Meshes(
-            verts=[self._points.to(self.device)],
-            faces=[self._surface_mesh_faces.to(self.device)],
-            textures=TexturesVertex(verts_features=self._vertex_colors[None].clamp(0, 1).to(self.device)),
-            # verts_normals=[verts_normals.to(rc.device)],
-        )
-        return surface_mesh
+        # surface_mesh = Meshes(
+        #     verts=[self._points.to(self.device)],
+        #     faces=[self._surface_mesh_faces.to(self.device)],
+        #     textures=self.
+        #     # verts_normals=[verts_normals.to(rc.device)],
+        # )
+        # return surface_mesh
+        return self.surface_mesh_torch3d
 
     def get_covariance(self, return_full_matrix=False, return_sqrt=False, inverse_scales=False):
         scaling = self.scaling
