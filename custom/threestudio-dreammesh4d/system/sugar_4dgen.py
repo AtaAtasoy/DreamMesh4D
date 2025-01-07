@@ -644,23 +644,25 @@ class SuGaR4DGen(BaseSuGaRSystem):
 
 
     def on_predict_epoch_end(self) -> None:
-        #self.texture_img = self.texture_img / self.texture_counter.clamp(min=1)
-        img_path = '/home/atasoy/DreamMesh4D/input/meshes/cow/cow_texture.png'
-        self.texture_img = torch.tensor(np.array(Image.open(img_path)).astype(np.float32) / 255.0).to(self.device)
+        self.texture_img = self.texture_img / self.texture_counter.clamp(min=1)
 
         video_length = 32
         timestamps = torch.as_tensor(
             np.linspace(0, 1, video_length+2, endpoint=True), dtype=torch.float32
         )[1:-1].to(self.device)
-        
-        textures_uv = self.surface_mesh.textures
-        
+
+        textures_uv = TexturesUV(
+            maps=self.texture_img[None],
+            verts_uvs=self.verts_uv[None],
+            faces_uvs=self.faces_uv[None],
+            sampling_mode='nearest',
+        )
+
         mesh_save_dir = os.path.join(self.get_save_dir(), f"extracted_textured_meshes")
         os.makedirs(mesh_save_dir, exist_ok=True)
         for i, t in enumerate(timestamps):
 
             timed_surface_mesh = self.geometry.get_timed_surface_mesh(timestamps[i:i+1])
-            threestudio.info(timed_surface_mesh.textures)
             verts = timed_surface_mesh.verts_list()[0]
             faces = timed_surface_mesh.faces_list()[0]
             textured_mesh = Meshes(
@@ -669,8 +671,8 @@ class SuGaR4DGen(BaseSuGaRSystem):
                 textures=textures_uv
             )
             
-            threestudio.info("Texture extracted.")        
-            threestudio.info("Saving textured mesh...")
+            # threestudio.info("Texture extracted.")        
+            # threestudio.info("Saving textured mesh...")
             
             mesh_save_path = os.path.join(
                 mesh_save_dir, f"extracted_mesh_{i}.obj"
