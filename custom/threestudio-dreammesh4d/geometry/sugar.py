@@ -179,54 +179,18 @@ class SuGaRModel(BaseGeometry):
         if mesh is None:
             
             torch3d_mesh = load_objs_as_meshes([self.cfg.surface_mesh_to_bind_path], device=self.device)
-            
-            verts = torch3d_mesh.verts_packed()
-            center = verts.mean(0)
-            torch3d_mesh.offset_verts_(-center)
-            
-            verts = torch3d_mesh.verts_packed()
-            scale = max(verts.max().item(), abs(verts.min().item()))
-
-            torch3d_mesh.scale_verts_((0.5 / float(scale)))
-                        
+                                    
             # threestudio.info(f"torch3d_mesh_textures: {torch3d_mesh.textures}")
-            
-            read_mesh = o3d.io.read_triangle_mesh(self.cfg.surface_mesh_to_bind_path)
-            read_mesh.vertices = o3d.utility.Vector3dVector(torch3d_mesh.verts_packed().cpu().numpy())
-            read_mesh.triangles = o3d.utility.Vector3iVector(torch3d_mesh.faces_packed().cpu().numpy())
-            # read_mesh.vertex_colors = o3d.utility.Vector3dVector(torch3d_mesh.textures.verts_features_packed().cpu().numpy())
-            
-            if not read_mesh.has_vertex_normals():
-                read_mesh.compute_vertex_normals()
-            threestudio.info(f"Mesh information: {read_mesh}")
-                        
-            # Check if the center is at (0, 0, 0)
-            threestudio.info(f"Center of the mesh: {read_mesh.get_center()}")
-            # assert np.allclose(read_mesh.get_center(), np.array([0, 0, 0]), atol=1e-3)
-            
             o3d_mesh = o3d.geometry.TriangleMesh()
-            o3d_mesh.vertices = read_mesh.vertices
-            o3d_mesh.triangles = read_mesh.triangles
-            o3d_mesh.triangle_material_ids = read_mesh.triangle_material_ids
-            o3d_mesh.vertex_colors = read_mesh.vertex_colors
-            o3d_mesh.textures = [read_mesh.textures[1], read_mesh.textures[1]] 
+            o3d_mesh.vertices = o3d.utility.Vector3dVector(torch3d_mesh.verts_packed().cpu().numpy())
+            o3d_mesh.triangles = o3d.utility.Vector3iVector(torch3d_mesh.faces_packed().cpu().numpy())
+            o3d_mesh.vertex_normals = o3d.utility.Vector3dVector(torch3d_mesh.verts_normals_packed().cpu().numpy())
             
-            # # Center the mesh
-            # vertices = np.asarray(o3d_mesh.vertices)
-            # mesh_center = (vertices.max(axis=0) + vertices.min(axis=0)) / 2
-            # vertices -= mesh_center
-            # o3d_mesh.vertices = o3d.utility.Vector3dVector(vertices)
-
-            # # Scale the mesh to fit inside the [-0.5, 0.5] cube
-            # max_extent = vertices.max() - vertices.min()
-            # scaling_factor = 1.0 / max_extent
-            # vertices *= scaling_factor
-            # o3d_mesh.vertices = o3d.utility.Vector3dVector(vertices)
-
-            # # Verify the mesh is within the cube
-            # bounds = np.asarray(o3d_mesh.get_axis_aligned_bounding_box().get_box_points())
-            # assert np.all(bounds >= -0.5) and np.all(bounds <= 0.5), "Mesh is not within the unit cube!"
-
+            if not o3d_mesh.has_vertex_normals():
+                o3d_mesh.compute_vertex_normals()
+                
+            # Check if the center is at (0, 0, 0)
+            threestudio.info(f"Center of the mesh: {o3d_mesh.get_center()}")
             threestudio.info(f"o3d_mesh information: {o3d_mesh}")
     
             # Rotate the mesh to achieve canonical pose in openCV 

@@ -245,6 +245,7 @@ class SuGaR4DGen(BaseSuGaRSystem):
             zero123_img = out["comp_rgb"]
             if self.true_global_step % 200 == 0:
                 img1, img2, img3, img4 = zero123_img[0], zero123_img[1], zero123_img[2], zero123_img[3]
+                # img1, img2 = zero123_img[0], zero123_img[1]
                 self.save_image_grid(
                     f"dynamic_rgb_{self.true_global_step}.png",
                     imgs=[
@@ -272,24 +273,6 @@ class SuGaR4DGen(BaseSuGaRSystem):
                         },                    
                     ]
                 )
-                # save_batch_to_json(batch=batch, output_dir="output/batches", prefix=f"camera_batch")
-                # save_image(img1.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_1.png")
-                # save_image(img2.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_2.png")
-                # save_image(img3.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_3.png")
-                # save_image(img4.permute(2, 0, 1), f"output/batches/dynamic_rgb_{self.true_global_step}_4.png")
-                
-                
-                # self.save_image(f"dynamic_rgb_{self.true_global_step}_1.png", img1)
-                # self.save_image(f"dynamic_rgb_{self.true_global_step}_2.png", img2)
-                # self.save_image(f"dynamic_rgb_{self.true_global_step}_3.png", img3)
-                # self.save_image(f"dynamic_rgb_{self.true_global_step}_4.png", img4)
-
-                # self.save_image(f"dynamic_rgb_{self.true_global_step}_1.png", img1)
-                # self.save_image(f"dynamic_rgb_{self.true_global_step}_2.png", img2)
-                # self.save_image(f"dynamic_rgb_{self.true_global_step}_3.png", img3)
-                # self.save_image(f"dynamic_rgb_{self.true_global_step}_4.png", img4)
-                
-
         # Regularization
         if (
             out.__contains__("comp_normal")
@@ -541,7 +524,6 @@ class SuGaR4DGen(BaseSuGaRSystem):
                 }
             )
             out = self(batch)
-            save_batch_to_json(batch=batch, output_dir="output/val_batches", prefix=f"val_camera_batch_{i}")
             save_out_to_image_grid(f"it{self.true_global_step}-val/vid-azi{azimuth}/{i}.png", out)
 
 
@@ -648,7 +630,7 @@ class SuGaR4DGen(BaseSuGaRSystem):
         img_path = '/home/atasoy/DreamMesh4D/input/meshes/cow/cow_texture.png'
         self.texture_img = torch.tensor(np.array(Image.open(img_path)).astype(np.float32) / 255.0).to(self.device)
 
-        video_length = 32
+        video_length = 16
         timestamps = torch.as_tensor(
             np.linspace(0, 1, video_length+2, endpoint=True), dtype=torch.float32
         )[1:-1].to(self.device)
